@@ -6,6 +6,8 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+const { getSuggestions } = require('./harmony');
+
 // rooms: { roomId: { users: Map<ws, {userId, userName}>, notes: [] } }
 const rooms = {};
 
@@ -83,10 +85,26 @@ wss.on('connection', (ws) => {
       currentRoom.notes.push(noteEvent);
       if (currentRoom.notes.length > 100) currentRoom.notes.shift(); // keep last 100
 
-      // Broadcast to everyone else in room
-      broadcast(currentRoom, { type: 'note', ...noteEvent }, ws);
+      // Broadcast note to everyone else in room
+    broadcast(currentRoom, { type: 'note', ...noteEvent }, ws);
 
-      console.log(`${currentUser.userName} played ${msg.note}`);
+    // Compute harmony suggestions from last 6 notes in room
+    const recentNotes = currentRoom.notes.slice(-6).map(n => n.note);
+    const harmony = getSuggestions(recentNotes);
+
+    // Broadcast suggestions to EVERYONE in room (including sender)
+    currentRoom.users.forEach((userInfo, client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+                type: 'suggestions',
+                suggestions: harmony.suggestions,
+                key: harmony.key,
+                chord: harmony.chord,
+            }));
+        }
+    });
+
+    console.log(`${currentUser.userName} played ${msg.note} → suggestions: ${harmony.suggestions}`);
     }
   });
 
@@ -108,3 +126,4 @@ app.get('/', (req, res) => res.send('Chordly backend running'));
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
